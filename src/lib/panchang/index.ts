@@ -4,8 +4,7 @@ import {
   TITHI_DEG,
   NAKSHATRA_DEG,
   YOGA_DEG,
-  GHATIKA_MINUTES,
-  VARJAM_DURATION_MINUTES,
+  VARJAM_DURATION_GHATIKA_FRACTION,
   AMRITA_DURATION_FACTOR,
   NAKSHATRA_THYAJYA_GHATIKA_OFFSETS,
   NAKSHATRA_AMRITA_START_HOURS,
@@ -22,6 +21,7 @@ import {
 import { amantaLunarMonthIndexFromSunsignPakshaAndNm } from './lunarMonth.js';
 import { ruthuvuIndexFromPanchang } from './ruthuvu.js';
 import { karanaIndexFromStep } from './karana.js';
+import { computeKarthi } from './karthi.js';
 import { durmuhurtamRanges, computeKaalams } from './kaalams.js';
 import { setSiderealModeFromQuery } from './ayanamsa.js';
 import type { PanchangElement, PanchangResult, SunMoonLon, TimeRange } from './types.js';
@@ -59,13 +59,16 @@ export function computePanchang(
   setSiderealModeFromQuery(ayanamsa);
 
   const { sunrise, sunset } = getSunriseSunset(dateStr, lat, lon, tz);
-  const { moonrise, moonset } = getMoonriseMoonset(dateStr, lat, lon, tz);
   const [y, m, d] = dateStr.split('-').map(Number);
   const nextDateStr = new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
   const { sunrise: nextSunrise } = getSunriseSunset(nextDateStr, lat, lon, tz);
 
   const jdStart = dateToJulianDay(sunrise);
   const jdEnd = dateToJulianDay(nextSunrise);
+
+  // Moonrise/moonset for this same sunrise → next-sunrise panchang day, not
+  // the civil midnight-to-midnight calendar day — see getMoonriseMoonset.
+  const { moonrise, moonset } = getMoonriseMoonset(jdStart, jdEnd, lat, lon);
 
   const getSunMoon = (jd: number): SunMoonLon => {
     const sun = calculatePosition(jd, Planet.Sun, SIDEREAL_FLAGS);
@@ -107,6 +110,7 @@ export function computePanchang(
   const sunsign = Math.floor(normalizeLon(sunLon) / 30) % 12;
   const lunarMonthIndex = amantaLunarMonthIndexFromSunsignPakshaAndNm(jdStart, sunsign, paksham, getSunMoon);
   const ruthuvuIndex = ruthuvuIndexFromPanchang(sunsign, lunarMonthIndex);
+  const karthi = computeKarthi(jdStart, (jd) => getSunMoon(jd).sun);
 
   const solarNoonMs = (sunrise.getTime() + sunset.getTime()) / 2;
   const abhijit24MinMs = 24 * 60 * 1000;
@@ -123,14 +127,22 @@ export function computePanchang(
   const durmuhurtham = durmuhurtamRanges(sunrise, sunset, weekday);
 
   // Walk every nakṣatra segment across the day window once; amṛta ghaṭiyalu
-  // and varjyam are both derived from these same segments below.
-  const nakshatraSegments: { idx: number; startJd: number; endJd: number }[] = [];
+  // and varjyam are both derived from these same segments below. `endJd` is
+  // clipped to jdEnd so the walk stays inside the day window; `trueEndJd` is
+  // the segment's real, unclipped transition (a nakṣatra can run past the
+  // next sunrise). Amṛta/varjyam offsets are proportions of the *whole*
+  // nakṣatra span, so they must be scaled by trueEndJd − startJd, not by the
+  // clipped duration — using the clipped one understates a trailing
+  // segment's real length and puts both windows in the wrong place.
+  const nakshatraSegments: { idx: number; startJd: number; endJd: number; trueEndJd: number }[] = [];
   let walkNakIdx = nakshatraAtStart;
   let walkSegStartJd = findSegmentStartBackward(jdStart, nakshatraValue, nakshatraAtStart, NAKSHATRA_DEG, 27);
   while (walkSegStartJd < jdEnd) {
-    const walkSegEndJd =
-      findTransition(walkSegStartJd, jdEnd, nakshatraValue, walkNakIdx, NAKSHATRA_DEG, 27) ?? jdEnd;
-    nakshatraSegments.push({ idx: walkNakIdx, startJd: walkSegStartJd, endJd: walkSegEndJd });
+    const trueEndJd =
+      findTransition(walkSegStartJd, walkSegStartJd + 2, nakshatraValue, walkNakIdx, NAKSHATRA_DEG, 27) ??
+      walkSegStartJd + 2;
+    const walkSegEndJd = Math.min(trueEndJd, jdEnd);
+    nakshatraSegments.push({ idx: walkNakIdx, startJd: walkSegStartJd, endJd: walkSegEndJd, trueEndJd });
     if (walkSegEndJd >= jdEnd) break;
     walkSegStartJd = walkSegEndJd;
     walkNakIdx = (walkNakIdx + 1) % 27;
@@ -138,7 +150,7 @@ export function computePanchang(
 
   const amrutaGhadiyalu: TimeRange[] = [];
   for (const seg of nakshatraSegments) {
-    const segDuration = seg.endJd - seg.startJd;
+    const segDuration = seg.trueEndJd - seg.startJd;
     if (segDuration <= 0) continue;
     const amritaX = NAKSHATRA_AMRITA_START_HOURS[seg.idx] ?? 0;
     const amritaStartJd = seg.startJd + (amritaX / 24) * segDuration;
@@ -149,18 +161,19 @@ export function computePanchang(
       amrutaGhadiyalu.push({ start: jdToDate(clippedStart), end: jdToDate(clippedEnd) });
   }
 
-  const varjamDurationInDays = VARJAM_DURATION_MINUTES / (24 * 60);
-  let varjam: TimeRange | null = null;
+  // One nakṣatra segment can produce at most one Varjyam window, but the day
+  // window can span two or more nakṣatra segments, so collect across all of
+  // them instead of stopping at the first hit.
+  const varjam: TimeRange[] = [];
   for (const seg of nakshatraSegments) {
+    const segDuration = seg.trueEndJd - seg.startJd;
+    if (segDuration <= 0) continue;
     const ghatikaOffset = NAKSHATRA_THYAJYA_GHATIKA_OFFSETS[seg.idx] ?? 0;
-    const varjamStartJd = seg.startJd + (ghatikaOffset * GHATIKA_MINUTES) / (24 * 60);
-    const varjamEndJd = varjamStartJd + varjamDurationInDays;
+    const varjamStartJd = seg.startJd + (ghatikaOffset / 60) * segDuration;
+    const varjamEndJd = varjamStartJd + VARJAM_DURATION_GHATIKA_FRACTION * segDuration;
     const clippedStart = Math.max(jdStart, varjamStartJd);
     const clippedEnd = Math.min(jdEnd, varjamEndJd);
-    if (clippedEnd > clippedStart) {
-      varjam = { start: jdToDate(clippedStart), end: jdToDate(clippedEnd) };
-      break;
-    }
+    if (clippedEnd > clippedStart) varjam.push({ start: jdToDate(clippedStart), end: jdToDate(clippedEnd) });
   }
 
   const karanas: PanchangElement[] = [];
@@ -207,6 +220,7 @@ export function computePanchang(
       endTime: yogaEndJd ? jdToDate(yogaEndJd) : null,
     },
     karanas,
+    karthi,
     kaalams,
     vara: weekday,
     paksham,

@@ -5,7 +5,7 @@ import {
   Planet,
   RiseTransitFlag,
 } from '@swisseph/node';
-import { calendarDateKeyInTz, midnightInTz } from '../timezone.js';
+import { midnightInTz } from '../timezone.js';
 import { TROPICAL_FLAGS } from './constants.js';
 import type { SunriseSunset, MoonriseMoonset } from './types.js';
 
@@ -81,13 +81,17 @@ function collectRiseTransitSequence(
   return out;
 }
 
-export function getMoonriseMoonset(dateStr: string, lat: number, lon: number, tz: string): MoonriseMoonset {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const nextDateStr = new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
-  const thisMid = midnightInTz(dateStr, tz);
-  const nextMid = midnightInTz(nextDateStr, tz);
-  const jdWindowStart = dateToJulianDay(thisMid) - 1;
-  const jdWindowEnd = dateToJulianDay(nextMid) + 1;
+/**
+ * Moonrise/moonset for the panchang day, defined as sunrise (`jdStart`) to
+ * the next sunrise (`jdEnd`) — the same window every other panchang element
+ * uses. This is deliberately not the civil midnight-to-midnight calendar
+ * day: an event between midnight and the next sunrise belongs to the
+ * panchang day that is still running, not the one that starts at the
+ * following sunrise.
+ */
+export function getMoonriseMoonset(jdStart: number, jdEnd: number, lat: number, lon: number): MoonriseMoonset {
+  const jdWindowStart = jdStart - 1;
+  const jdWindowEnd = jdEnd + 1;
 
   const riseJds = collectRiseTransitSequence(
     Planet.Moon,
@@ -107,9 +111,9 @@ export function getMoonriseMoonset(dateStr: string, lat: number, lon: number, tz
     lat,
     8
   );
-  const onDay = (jd: number) => calendarDateKeyInTz(jdToDate(jd), tz) === dateStr;
-  const risesToday = riseJds.filter(onDay);
-  const setsToday = setJds.filter(onDay);
+  const inWindow = (jd: number) => jd >= jdStart && jd < jdEnd;
+  const risesToday = riseJds.filter(inWindow);
+  const setsToday = setJds.filter(inWindow);
 
   return {
     moonrise: risesToday.length > 0 ? jdToDate(Math.min(...risesToday)) : null,

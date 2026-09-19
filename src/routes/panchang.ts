@@ -53,6 +53,11 @@ function normalizeCorePayload(result: ReturnType<typeof computePanchang>) {
       startTime: k.startTime.toISOString(),
       endTime: asIso(k.endTime),
     })),
+    karthi: {
+      ...result.karthi,
+      startTime: result.karthi.startTime.toISOString(),
+      endTime: asIso(result.karthi.endTime),
+    },
     kaalams: result.kaalams.map((k) => ({
       ...k,
       start: k.start.toISOString(),
@@ -70,12 +75,10 @@ function normalizeCorePayload(result: ReturnType<typeof computePanchang>) {
       start: r.start.toISOString(),
       end: r.end.toISOString(),
     })),
-    varjam: result.varjam
-      ? {
-          start: result.varjam.start.toISOString(),
-          end: result.varjam.end.toISOString(),
-        }
-      : null,
+    varjam: result.varjam.map((r) => ({
+      start: r.start.toISOString(),
+      end: r.end.toISOString(),
+    })),
     durmuhurtham: result.durmuhurtham.map((r) => ({
       start: r.start.toISOString(),
       end: r.end.toISOString(),

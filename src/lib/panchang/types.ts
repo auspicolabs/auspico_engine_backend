@@ -34,6 +34,7 @@ export interface PanchangResult {
   nakshatra: PanchangElement;
   yoga: PanchangElement;
   karanas: PanchangElement[];
+  karthi: PanchangElement;
   kaalams: Kaalam[];
   vara: number;
   paksham: number;
@@ -46,7 +47,7 @@ export interface PanchangResult {
   abhijit: TimeRange;
   brahmaMuhurtam: TimeRange;
   amrutaGhadiyalu: TimeRange[];
-  varjam: TimeRange | null;
+  varjam: TimeRange[];
   durmuhurtham: TimeRange[];
 }
 

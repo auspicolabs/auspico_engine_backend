@@ -1,13 +1,18 @@
 import type { Kaalam, TimeRange } from './types.js';
 
 const DUR_MUHURTAM_48_MS = 48 * 60 * 1000;
-const DUR_MUHURTAM_96_MS = 96 * 60 * 1000;
 
 function durMuhurtamOffsetMs(hours: number, minutes: number): number {
   return (hours * 60 + minutes) * 60 * 1000;
 }
 
-/** Durmuhūrtam — fully hardcoded per weekday, as fixed offsets from sunrise/sunset. */
+/**
+ * Durmuhūrtam — fully hardcoded per weekday, as fixed offsets from
+ * sunrise/sunset. This is the Phase-1 Telugu ruleset's chosen convention;
+ * see docs/PANCHANG_LOGIC.md §6.2 for why Saturday in particular is a single
+ * 48-minute window (not the 96-minute window some other sources use) and
+ * for the source cross-checked against.
+ */
 export function durmuhurtamRanges(sunrise: Date, sunset: Date, weekday: number): TimeRange[] {
   const sr = sunrise.getTime();
   const ss = sunset.getTime();
@@ -31,7 +36,7 @@ export function durmuhurtamRanges(sunrise: Date, sunset: Date, weekday: number):
     case 5:
       return [span(sr + o(2, 24), DUR_MUHURTAM_48_MS), span(sr + o(8, 48), DUR_MUHURTAM_48_MS)];
     case 6:
-      return [span(sr, DUR_MUHURTAM_96_MS)];
+      return [span(sr, DUR_MUHURTAM_48_MS)];
     default:
       return [span(sr + o(10, 24), DUR_MUHURTAM_48_MS)];
   }
@@ -40,7 +45,7 @@ export function durmuhurtamRanges(sunrise: Date, sunset: Date, weekday: number):
 // Part index (1-based, of 8 equal sunrise→sunset parts), by weekday (0 = Sunday … 6 = Saturday).
 const RAHU_KAALAM_PART_BY_WEEKDAY = [8, 2, 7, 5, 6, 4, 3];
 const YAMAGANDAM_PART_BY_WEEKDAY = [5, 4, 3, 2, 1, 7, 6];
-const GULIKA_KAALAM_PART_BY_WEEKDAY = [7, 8, 2, 3, 4, 5, 6];
+const GULIKA_KAALAM_PART_BY_WEEKDAY = [7, 6, 5, 4, 3, 2, 1];
 
 /** Rāhu / Yamagaṇḍa / Gulika kālam — each a fixed 1/8th slice of sunrise→sunset, keyed by weekday. */
 export function computeKaalams(weekday: number, sunrise: Date, partDuration: number): Kaalam[] {
