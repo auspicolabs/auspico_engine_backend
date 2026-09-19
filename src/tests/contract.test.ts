@@ -39,6 +39,31 @@ async function run() {
   assert.equal(invalidResp.statusCode, 400);
   assert.equal(invalidResp.json().code, 'INVALID_LAT');
 
+  const festResp = await app.inject({
+    method: 'GET',
+    url: '/api/v1/festivals?year=2026&lat=17.385&lon=78.4867&tz=Asia/Kolkata&ayanamsa=lahiri',
+  });
+  assert.equal(festResp.statusCode, 200);
+  const festDates = new Map<string, string>(
+    festResp.json().festivals.map((f: { id: string; date: string }) => [f.id, f.date])
+  );
+  assert.equal(festDates.get('ugadi'), '2026-03-19');
+  assert.equal(festDates.get('vinayaka-chavithi'), '2026-09-14');
+  assert.equal(festDates.get('diwali'), '2026-11-08');
+  assert.equal(festDates.get('makara-sankranti'), '2026-01-14');
+  assert.equal(festDates.get('christmas'), undefined);
+  assert.equal(
+    festResp.json().festivals.filter((f: { id: string }) => f.id === 'shravana-sukravaram').length >= 4,
+    true
+  );
+
+  const badYear = await app.inject({
+    method: 'GET',
+    url: '/api/v1/festivals?year=abc&lat=17.385&lon=78.4867&tz=Asia/Kolkata',
+  });
+  assert.equal(badYear.statusCode, 400);
+  assert.equal(badYear.json().code, 'INVALID_YEAR');
+
   await app.close();
   console.log('Auspico contract tests passed');
 }
